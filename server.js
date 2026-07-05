@@ -114,6 +114,16 @@ function buildNovelAiMultipartPayload(payload) {
   return form;
 }
 
+function makeNovelAiCorrelationId() {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = crypto.randomBytes(6);
+  let id = "";
+  for (const byte of bytes) {
+    id += alphabet[byte % alphabet.length];
+  }
+  return id;
+}
+
 function findEndOfCentralDirectory(buffer) {
   for (let i = buffer.length - 22; i >= 0; i -= 1) {
     if (buffer.readUInt32LE(i) === 0x06054b50) return i;
@@ -193,7 +203,7 @@ async function proxyNovelAi(req, res) {
       return;
     }
 
-    const correlationId = crypto.randomUUID();
+    const correlationId = makeNovelAiCorrelationId();
     const upstream = await fetch(endpoint, {
       method: "POST",
       headers: {
