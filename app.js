@@ -934,12 +934,23 @@ async function extractPngTextEntries(buffer) {
 function tryParseJson(text) {
   if (!text || typeof text !== "string") return null;
   const trimmed = text.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return null;
+  const candidates = [trimmed];
+  const objectStart = trimmed.indexOf("{");
+  const objectEnd = trimmed.lastIndexOf("}");
+
+  if (objectStart >= 0 && objectEnd > objectStart) {
+    candidates.push(trimmed.slice(objectStart, objectEnd + 1));
   }
+
+  for (const candidate of candidates) {
+    if (!candidate.startsWith("{") && !candidate.startsWith("[")) continue;
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Try the next possible JSON span.
+    }
+  }
+  return null;
 }
 
 function looksLikeNovelAiMetadata(value) {
@@ -968,8 +979,141 @@ function parseNovelAiMetadataFromEntries(entries) {
     if (seen.has(entry)) continue;
     seen.add(entry);
 
-    const parsed = tryParseJson(entry.text);
+    const parsed = parseNovelAiMetadataText(entry.text);
     if (looksLikeNovelAiMetadata(parsed)) return parsed;
+  }
+
+  return null;
+}
+
+function parseNovelAiMetadataText(text) {
+  const parsed = tryParseJson(text);
+  return looksLikeNovelAiMetadata(parsed) ? parsed : null;
+}
+
+function bytesToBits(bytes) {
+  return Array.from(bytes, (byte) => byte.toString(2).padStart(8, "0")).join("");
+}
+
+function bitsToBytes(bits) {
+  const byteLength = Math.floor(bits.length / 8);
+  const bytes = new Uint8Array(byteLength);
+  for (let index = 0; index < byteLength; index += 1) {
+    bytes[index] = Number.parseInt(bits.slice(index * 8, index * 8 + 8), 2);
+  }
+  return bytes;
+}
+
+function makeImageBitReader(imageData, width, height, channelOffsets, order) {
+  const data = imageData.data;
+  const totalPixels = width * height;
+  let pixelIndex = 0;
+  let channelIndex = 0;
+
+  function pixelOffset(index) {
+    if (order === "column") {
+      const x = Math.floor(index / height);
+      const y = index % height;
+      return (y * width + x) * 4;
+    }
+
+    return index * 4;
+  }
+
+  return {
+    read(count) {
+      let bits = "";
+      while (bits.length < count && pixelIndex < totalPixels) {
+        const offset = pixelOffset(pixelIndex) + channelOffsets[channelIndex];
+        bits += String(data[offset] & 1);
+        channelIndex += 1;
+
+        if (channelIndex >= channelOffsets.length) {
+          channelIndex = 0;
+          pixelIndex += 1;
+        }
+      }
+      return bits.length === count ? bits : "";
+    },
+    remaining() {
+      return totalPixels * channelOffsets.length - (pixelIndex * channelOffsets.length + channelIndex);
+    },
+  };
+}
+
+async function decodeStealthPayload(bytes, compressed) {
+  if (compressed) {
+    const inflated = await inflatePngText(bytes);
+    if (inflated) return decodeUtf8(inflated);
+  }
+  return decodeUtf8(bytes);
+}
+
+async function readStealthMetadataFromImageData(imageData, width, height, config) {
+  const signatureBitLength = "stealth_pnginfo".length * 8;
+  const reader = makeImageBitReader(imageData, width, height, config.channels, config.order);
+  const signature = decodeUtf8(bitsToBytes(reader.read(signatureBitLength)));
+  if (signature !== "stealth_pnginfo" && signature !== "stealth_pngcomp") return null;
+
+  const lengthBits = reader.read(32);
+  if (!lengthBits) return null;
+
+  const declaredLength = Number.parseInt(lengthBits, 2);
+  if (!Number.isFinite(declaredLength) || declaredLength <= 0) return null;
+
+  const remaining = reader.remaining();
+  const lengthOptions = [declaredLength];
+  if (declaredLength <= Math.floor(remaining / 8)) lengthOptions.push(declaredLength * 8);
+
+  for (const bitLength of lengthOptions) {
+    if (bitLength <= 0 || bitLength > remaining) continue;
+
+    const retryReader = makeImageBitReader(imageData, width, height, config.channels, config.order);
+    retryReader.read(signatureBitLength + 32);
+    const payloadBits = retryReader.read(bitLength);
+    if (!payloadBits) continue;
+
+    try {
+      const text = await decodeStealthPayload(bitsToBytes(payloadBits), signature === "stealth_pngcomp");
+      const parsed = parseNovelAiMetadataText(text);
+      if (parsed) return parsed;
+    } catch {
+      // Try the next length interpretation or channel layout.
+    }
+  }
+
+  return null;
+}
+
+async function extractNovelAiStealthMetadata(image) {
+  if (!image) return null;
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
+  if (!width || !height) return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const canvasCtx = canvas.getContext("2d", { willReadFrequently: true });
+  canvasCtx.drawImage(image, 0, 0);
+
+  let imageData;
+  try {
+    imageData = canvasCtx.getImageData(0, 0, width, height);
+  } catch {
+    return null;
+  }
+
+  const configs = [
+    { channels: [3], order: "column" },
+    { channels: [3], order: "row" },
+    { channels: [0, 1, 2], order: "column" },
+    { channels: [0, 1, 2], order: "row" },
+  ];
+
+  for (const config of configs) {
+    const parsed = await readStealthMetadataFromImageData(imageData, width, height, config);
+    if (parsed) return parsed;
   }
 
   return null;
@@ -1107,11 +1251,11 @@ function normalizeNovelAiMetadata(raw) {
   };
 }
 
-async function readNovelAiMetadataFromFile(file) {
+async function readNovelAiMetadataFromFile(file, image) {
   if (!file || !/\.png$/i.test(file.name || "")) return null;
   const buffer = await file.arrayBuffer();
   const entries = await extractPngTextEntries(buffer);
-  const raw = parseNovelAiMetadataFromEntries(entries);
+  const raw = parseNovelAiMetadataFromEntries(entries) || (await extractNovelAiStealthMetadata(image));
   return raw ? normalizeNovelAiMetadata(raw) : null;
 }
 
@@ -1288,7 +1432,7 @@ async function loadImageFromFile(file) {
   const url = URL.createObjectURL(file);
   try {
     const image = await loadImageUrl(url);
-    const metadata = await readNovelAiMetadataFromFile(file).catch(() => null);
+    const metadata = await readNovelAiMetadataFromFile(file, image).catch(() => null);
     setOriginalImage(image, file.name, metadata);
   } finally {
     URL.revokeObjectURL(url);

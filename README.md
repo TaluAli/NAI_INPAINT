@@ -5,7 +5,7 @@ Patchwright is a local browser tool for NovelAI-style partial inpainting.
 ## 업데이트 내역 / Update Notes
 
 - 2026-07-05: 이미지 파일 드래그 앤 드롭으로 원본 이미지를 바로 불러오고, 브라우저가 이미지를 새 페이지로 여는 기본 동작을 차단했습니다. / Added drag-and-drop image loading and prevented the browser's default image-open behavior.
-- 2026-07-05: NovelAI PNG의 내장 메타데이터에서 프롬프트, 네거티브 프롬프트, 캐릭터 프롬프트, 설정을 선택 적용할 수 있게 했습니다. / Added selective import for prompt, negative prompt, character prompts, and settings from embedded NovelAI PNG metadata.
+- 2026-07-05: NovelAI PNG의 텍스트/숨김 메타데이터에서 프롬프트, 네거티브 프롬프트, 캐릭터 프롬프트, 설정을 선택 적용할 수 있게 했습니다. / Added selective import for prompt, negative prompt, character prompts, and settings from text and hidden NovelAI PNG metadata.
 - 2026-07-05: API 인페인트 요청은 28 steps, 1 sample, 1024 x 1024 이하 크롭만 허용하도록 무료 안전 잠금을 유지합니다. / Kept free-safe API locks: 28 steps, 1 sample, and crop sizes up to 1024 x 1024.
 
 ## Run
@@ -46,7 +46,7 @@ Manual export/import is still available with the crop PNG, mask PNG, and inpaint
 
 The original high-resolution image stays in the browser. The local proxy forwards only the selected crop, mask, prompt, and API parameters to NovelAI.
 
-NovelAI metadata import reads PNG text metadata such as `Comment` JSON, including compressed `iTXt`/`zTXt` chunks when the browser supports decompression. Imported settings never override the free-safe locks below.
+NovelAI metadata import reads PNG text metadata such as `Comment` JSON, compressed `iTXt`/`zTXt` chunks when the browser supports decompression, and hidden `stealth_pnginfo`/`stealth_pngcomp` metadata stored in image pixels. Imported settings never override the free-safe locks below.
 
 ## Free-safe locks
 
