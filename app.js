@@ -25,6 +25,7 @@ const state = {
   inpaintName: "",
   apiRunning: false,
   drag: null,
+  fileDragDepth: 0,
   pointer: null,
   renderQueued: false,
   novelAiMetadata: null,
@@ -1225,6 +1226,63 @@ function applyNovelAiMetadata(part) {
   }
 }
 
+function isImageFile(file) {
+  if (!file) return false;
+  return file.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(file.name || "");
+}
+
+function hasDraggedFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes("Files");
+}
+
+function getDroppedImageFile(dataTransfer) {
+  return Array.from(dataTransfer?.files || []).find(isImageFile) || null;
+}
+
+function setFileDragging(active) {
+  document.body.classList.toggle("dragging-file", active);
+}
+
+function onFileDragEnter(event) {
+  if (!hasDraggedFiles(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  state.fileDragDepth += 1;
+  setFileDragging(true);
+}
+
+function onFileDragOver(event) {
+  if (!hasDraggedFiles(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  event.dataTransfer.dropEffect = "copy";
+  setFileDragging(true);
+}
+
+function onFileDragLeave(event) {
+  if (!hasDraggedFiles(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  state.fileDragDepth = Math.max(0, state.fileDragDepth - 1);
+  if (state.fileDragDepth === 0) setFileDragging(false);
+}
+
+async function onFileDrop(event) {
+  if (!hasDraggedFiles(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  state.fileDragDepth = 0;
+  setFileDragging(false);
+
+  const file = getDroppedImageFile(event.dataTransfer);
+  if (!file) {
+    alert("이미지 파일을 드롭하세요.");
+    return;
+  }
+
+  await loadImageFromFile(file);
+}
+
 async function loadImageFromFile(file) {
   if (!file) return;
   const url = URL.createObjectURL(file);
@@ -1820,6 +1878,10 @@ function bindEvents() {
   els.canvas.addEventListener("pointerup", onPointerUp);
   els.canvas.addEventListener("pointercancel", onPointerUp);
   els.canvas.addEventListener("pointerleave", onPointerLeave);
+  document.addEventListener("dragenter", onFileDragEnter);
+  document.addEventListener("dragover", onFileDragOver);
+  document.addEventListener("dragleave", onFileDragLeave);
+  document.addEventListener("drop", onFileDrop);
 
   window.addEventListener("keydown", (event) => {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
