@@ -5,6 +5,7 @@ Patchwright is a local browser tool for NovelAI-style partial inpainting.
 ## 업데이트 내역 / Update Notes
 
 - 2026-07-05: 이미지 파일 드래그 앤 드롭으로 원본 이미지를 바로 불러오고, 브라우저가 이미지를 새 페이지로 여는 기본 동작을 차단했습니다. / Added drag-and-drop image loading and prevented the browser's default image-open behavior.
+- 2026-07-05: NovelAI multipart 요청에서 `request`를 일반 텍스트 필드로 보내고 V4 모델에는 항상 `v4_prompt` 구조를 포함하도록 수정했습니다. / Fixed NovelAI multipart requests to send `request` as a text field and always include the `v4_prompt` structure for V4 models.
 - 2026-07-05: NovelAI API가 요구하는 6자리 영문/숫자 `x-correlation-id`를 사용하도록 수정했습니다. / Fixed `x-correlation-id` generation to use the 6-character alphanumeric value required by the NovelAI API.
 - 2026-07-05: NovelAI PNG의 텍스트/숨김 메타데이터에서 프롬프트, 네거티브 프롬프트, 캐릭터 프롬프트, 설정을 선택 적용할 수 있게 했습니다. / Added selective import for prompt, negative prompt, character prompts, and settings from text and hidden NovelAI PNG metadata.
 - 2026-07-05: API 인페인트 요청은 28 steps, 1 sample, 1024 x 1024 이하 크롭만 허용하도록 무료 안전 잠금을 유지합니다. / Kept free-safe API locks: 28 steps, 1 sample, and crop sizes up to 1024 x 1024.

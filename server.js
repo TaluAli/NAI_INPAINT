@@ -92,7 +92,7 @@ function validateFreeSafeInpaintPayload(payload) {
 function appendBase64Png(form, base64, fieldName) {
   const buffer = Buffer.from(String(base64 || ""), "base64");
   const blob = new Blob([buffer], { type: "image/png" });
-  form.append(fieldName, blob);
+  form.append(fieldName, blob, `${fieldName}.png`);
   return fieldName;
 }
 
@@ -110,7 +110,7 @@ function buildNovelAiMultipartPayload(payload) {
     params.mask = appendBase64Png(form, params.mask, "mask");
   }
 
-  form.append("request", new Blob([JSON.stringify(requestPayload)], { type: "application/json" }));
+  form.append("request", JSON.stringify(requestPayload));
   return form;
 }
 
@@ -225,9 +225,16 @@ async function proxyNovelAi(req, res) {
         const parsed = JSON.parse(rawMessage);
         message = parsed.message || parsed.error || rawMessage;
       } catch {}
+      console.error("[NovelAI upstream error]", {
+        status: upstream.status,
+        contentType: upstreamType,
+        correlationId,
+        message,
+      });
       sendJson(res, upstream.status, {
         error: `NovelAI API 오류 ${upstream.status}`,
         detail: message,
+        correlationId,
       });
       return;
     }
@@ -250,7 +257,11 @@ async function proxyNovelAi(req, res) {
       "Cache-Control": "no-store",
     });
   } catch (error) {
-    sendJson(res, 500, { error: error.message || "프록시 처리 중 오류가 났습니다." });
+    console.error("[Patchwright proxy error]", error);
+    sendJson(res, 500, {
+      error: "Patchwright 로컬 프록시 오류",
+      detail: error.message || "프록시 처리 중 오류가 났습니다.",
+    });
   }
 }
 

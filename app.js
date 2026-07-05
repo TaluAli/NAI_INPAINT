@@ -1686,6 +1686,10 @@ function makeV4Caption(baseCaption, characters, key) {
   };
 }
 
+function usesV4Prompt(model) {
+  return /nai-diffusion-4/i.test(model);
+}
+
 function buildNovelAiPayload() {
   const prompt = els.apiPromptInput.value.trim();
   const negativePrompt = els.apiNegativeInput.value.trim();
@@ -1724,7 +1728,7 @@ function buildNovelAiPayload() {
     add_original_image: false,
   };
 
-  if (characterPrompts.length) {
+  if (usesV4Prompt(model) || characterPrompts.length) {
     parameters.v4_prompt = makeV4Caption(prompt, characterPrompts, "positive");
     parameters.v4_negative_prompt = makeV4Caption(negativePrompt, characterPrompts, "negative");
   }
@@ -1786,13 +1790,16 @@ async function runNovelAiInpaint() {
 
     if (!response.ok) {
       let detail = "";
+      let correlationId = "";
       try {
         const errorPayload = await response.json();
         detail = errorPayload.detail || errorPayload.error || "";
+        correlationId = errorPayload.correlationId || "";
       } catch {
         detail = await response.text();
       }
-      throw new Error(explainApiError(detail || `API 호출 실패: ${response.status}`));
+      const suffix = correlationId ? `\ncorrelation id: ${correlationId}` : "";
+      throw new Error(explainApiError(detail || `API 호출 실패: ${response.status}`) + suffix);
     }
 
     const contentType = response.headers.get("content-type") || "";
