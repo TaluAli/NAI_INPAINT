@@ -98,7 +98,6 @@ function appendBase64Png(form, base64, fieldName) {
 
 function buildNovelAiMultipartPayload(payload) {
   const requestPayload = JSON.parse(JSON.stringify(payload));
-  requestPayload.use_new_shared_trial = true;
 
   const form = new FormData();
   const params = requestPayload.parameters || {};

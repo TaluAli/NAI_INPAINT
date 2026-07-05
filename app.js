@@ -1306,6 +1306,7 @@ function setSelectValue(select, value) {
   const option = Array.from(select.options).find((item) => item.value === value);
   if (!option) return false;
   select.value = value;
+  updateNoiseScheduleOptions();
   return true;
 }
 
@@ -1690,6 +1691,12 @@ function usesV4Prompt(model) {
   return /nai-diffusion-4/i.test(model);
 }
 
+function validateNovelAiSettings(model) {
+  if (usesV4Prompt(model) && els.apiNoiseScheduleSelect.value === "native") {
+    throw new Error("V4/V4.5 모델은 Noise Schedule `native`를 지원하지 않습니다. karras, exponential, polyexponential 중 하나를 선택하세요.");
+  }
+}
+
 function buildNovelAiPayload() {
   const prompt = els.apiPromptInput.value.trim();
   const negativePrompt = els.apiNegativeInput.value.trim();
@@ -1704,6 +1711,7 @@ function buildNovelAiPayload() {
   if (!prompt) throw new Error("프롬프트를 입력하세요.");
   if (!model) throw new Error("모델명을 입력하세요.");
   if (!endpoint) throw new Error("API 엔드포인트를 입력하세요.");
+  validateNovelAiSettings(model);
 
   if (state.crop.w * state.crop.h > FREE_MAX_PIXELS || state.crop.w > MAX_CROP || state.crop.h > MAX_CROP) {
     throw new Error("Free-safe mode only allows crops up to 1024 x 1024 / 1 megapixel.");
@@ -1723,7 +1731,7 @@ function buildNovelAiPayload() {
     noise: getNumberValue(els.apiNoiseInput, 0.1),
     negative_prompt: negativePrompt,
     image: canvasToBase64(buildCropCanvas()),
-    mask: canvasToBase64(buildNovelAiServerMaskCanvas()),
+    mask: canvasToBase64(buildNovelAiLowResMaskCanvas()),
     n_samples: FIXED_N_SAMPLES,
     add_original_image: false,
   };
@@ -1761,6 +1769,17 @@ function setApiRunning(running) {
   state.apiRunning = running;
   els.apiInpaintButton.disabled = running;
   els.apiInpaintButton.textContent = running ? "API 호출 중" : "API 인페인트";
+}
+
+function updateNoiseScheduleOptions() {
+  const nativeOption = Array.from(els.apiNoiseScheduleSelect.options).find((option) => option.value === "native");
+  if (!nativeOption) return;
+
+  const disableNative = usesV4Prompt(els.apiModelInput.value.trim());
+  nativeOption.disabled = disableNative;
+  if (disableNative && els.apiNoiseScheduleSelect.value === "native") {
+    els.apiNoiseScheduleSelect.value = "karras";
+  }
 }
 
 async function runNovelAiInpaint() {
@@ -1996,6 +2015,8 @@ function bindEvents() {
   els.applyMetaCharactersButton.addEventListener("click", () => applyNovelAiMetadata("characters"));
   els.applyMetaSettingsButton.addEventListener("click", () => applyNovelAiMetadata("settings"));
   els.applyMetaAllButton.addEventListener("click", () => applyNovelAiMetadata("all"));
+  els.apiModelInput.addEventListener("input", updateNoiseScheduleOptions);
+  els.apiModelInput.addEventListener("change", updateNoiseScheduleOptions);
 
   for (const input of [els.cropXInput, els.cropYInput, els.cropWInput, els.cropHInput]) {
     input.addEventListener("change", handleCropInput);
@@ -2061,6 +2082,7 @@ function init() {
   updateControls();
   updateStatus();
   updateMetadataBox();
+  updateNoiseScheduleOptions();
   setMode("crop");
 
   const resizeObserver = new ResizeObserver(setCanvasSize);
