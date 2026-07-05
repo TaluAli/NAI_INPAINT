@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Patchwright</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">P</span>
+          <div>
+            <h1>Patchwright</h1>
+            <p>1024 crop inpaint compositor</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <label class="button primary" for="originalInput">원본 열기</label>
+          <button class="button" id="loadSampleButton" type="button">샘플</button>
+          <button class="button" id="resetButton" type="button">초기화</button>
+        </div>
+      </header>
+
+      <main class="workspace" aria-label="Patchwright editor">
+        <aside class="panel left-panel">
+          <section class="panel-section">
+            <h2>작업 단계</h2>
+            <div class="mode-switch" role="tablist" aria-label="작업 모드">
+              <button class="mode-button active" id="cropModeButton" type="button" role="tab" aria-selected="true">크롭</button>
+              <button class="mode-button" id="maskModeButton" type="button" role="tab" aria-selected="false">마스크</button>
+              <button class="mode-button" id="blendModeButton" type="button" role="tab" aria-selected="false">합성</button>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <h2>원본</h2>
+            <input id="originalInput" class="visually-hidden" type="file" accept="image/*">
+            <dl class="metric-list">
+              <div>
+                <dt>파일</dt>
+                <dd id="fileName">없음</dd>
+              </div>
+              <div>
+                <dt>크기</dt>
+                <dd id="imageSize">0 x 0</dd>
+              </div>
+              <div>
+                <dt>크롭</dt>
+                <dd id="cropSize">0 x 0</dd>
+              </div>
+              <div>
+                <dt>마스크</dt>
+                <dd id="maskCoverage">0%</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="panel-section">
+            <h2>크롭 좌표</h2>
+            <div class="input-grid">
+              <label>
+                <span>X</span>
+                <input id="cropXInput" type="number" min="0" step="1" value="0">
+              </label>
+              <label>
+                <span>Y</span>
+                <input id="cropYInput" type="number" min="0" step="1" value="0">
+              </label>
+              <label>
+                <span>W</span>
+                <input id="cropWInput" type="number" min="64" max="1024" step="1" value="0">
+              </label>
+              <label>
+                <span>H</span>
+                <input id="cropHInput" type="number" min="64" max="1024" step="1" value="0">
+              </label>
+            </div>
+            <div class="button-row">
+              <button class="button compact" id="centerCropButton" type="button">중앙</button>
+              <button class="button compact" id="squareCropButton" type="button">정사각</button>
+              <button class="button compact" id="maxCropButton" type="button">최대</button>
+            </div>
+            <p class="workflow-note">초록 박스는 NovelAI로 보낼 작은 이미지 범위입니다. 실제 인페인트 영역은 다음 단계에서 칠합니다.</p>
+            <button class="button primary full" id="goMaskButton" type="button">이 크롭에서 마스크 칠하기</button>
+          </section>
+        </aside>
+
+        <section class="stage-wrap">
+          <div class="stage-toolbar">
+            <div class="stage-title">
+              <strong id="stageTitle">크롭 영역 선택</strong>
+              <span id="stageHint">테두리와 모서리를 드래그하세요.</span>
+            </div>
+            <div class="status-strip">
+              <span id="limitStatus">1024 제한 준비</span>
+              <span id="resultStatus">결과 없음</span>
+            </div>
+          </div>
+          <div class="canvas-frame">
+            <canvas id="editorCanvas" aria-label="image editor canvas"></canvas>
+            <div class="empty-state" id="emptyState">
+              <strong>원본 이미지를 열어 시작</strong>
+              <span>고해상도 이미지는 브라우저 안에서만 처리됩니다.</span>
+            </div>
+          </div>
+        </section>
+
+        <aside class="panel right-panel">
+          <section class="panel-section">
+            <h2>마스크</h2>
+            <p class="workflow-note">마스크 단계에서는 선택한 크롭만 확대됩니다. 수정할 부분을 마우스로 칠하면 그 부분만 인페인트됩니다.</p>
+            <div class="mode-switch two" role="group" aria-label="브러시 모드">
+              <button class="mode-button active" id="paintButton" type="button">칠하기</button>
+              <button class="mode-button" id="eraseButton" type="button">지우기</button>
+            </div>
+            <label class="range-field">
+              <span>브러시</span>
+              <input id="brushSizeInput" type="range" min="4" max="180" value="56">
+              <output id="brushSizeOutput">56 px</output>
+            </label>
+            <label class="checkbox-field">
+              <input id="squareBrushInput" type="checkbox">
+              <span>Square Brush</span>
+            </label>
+            <div class="button-row">
+              <button class="button compact" id="undoMaskButton" type="button">되돌리기</button>
+              <button class="button compact" id="redoMaskButton" type="button">다시</button>
+              <button class="button compact danger" id="clearMaskButton" type="button">비우기</button>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <h2>NovelAI 파일</h2>
+            <label class="select-field">
+              <span>마스크 형식</span>
+              <select id="maskFormatSelect">
+                <option value="bw">흰색 영역, 검은 배경</option>
+                <option value="alpha">흰색 영역, 투명 배경</option>
+              </select>
+            </label>
+            <div class="button-stack">
+              <button class="button" id="exportCropButton" type="button">크롭 PNG</button>
+              <button class="button" id="exportMaskButton" type="button">마스크 PNG</button>
+              <button class="button" id="exportBothButton" type="button">둘 다 저장</button>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <h2>NovelAI API</h2>
+            <label class="select-field">
+              <span>API 토큰</span>
+              <input id="apiTokenInput" type="password" autocomplete="off" placeholder="Bearer 토큰 또는 API 토큰">
+            </label>
+            <label class="select-field">
+              <span>엔드포인트</span>
+              <input id="apiEndpointInput" type="url" value="https://image.novelai.net/ai/generate-image">
+            </label>
+            <label class="select-field">
+              <span>모델</span>
+              <input id="apiModelInput" type="text" list="apiModelList" value="nai-diffusion-4-5-full-inpainting">
+              <datalist id="apiModelList">
+                <option value="nai-diffusion-4-5-full-inpainting"></option>
+                <option value="nai-diffusion-4-5-curated-inpainting"></option>
+                <option value="nai-diffusion-4-full-inpainting"></option>
+                <option value="nai-diffusion-4-curated-inpainting"></option>
+                <option value="nai-diffusion-3-inpainting"></option>
+                <option value="nai-diffusion-furry-3-inpainting"></option>
+              </datalist>
+            </label>
+            <label class="text-field">
+              <span>프롬프트</span>
+              <textarea id="apiPromptInput" rows="4" placeholder="수정할 영역에 들어갈 내용을 적으세요."></textarea>
+            </label>
+            <label class="text-field">
+              <span>네거티브</span>
+              <textarea id="apiNegativeInput" rows="3" placeholder="lowres, bad anatomy, blurry"></textarea>
+            </label>
+            <div class="metadata-box" id="metadataBox" hidden>
+              <div class="metadata-header">
+                <strong>NovelAI metadata</strong>
+                <span id="metadataSummary"></span>
+              </div>
+              <div class="button-row metadata-actions">
+                <button class="button compact" id="applyMetaPromptButton" type="button">프롬프트</button>
+                <button class="button compact" id="applyMetaNegativeButton" type="button">네거티브</button>
+                <button class="button compact" id="applyMetaCharactersButton" type="button">캐릭터</button>
+                <button class="button compact" id="applyMetaSettingsButton" type="button">설정</button>
+                <button class="button compact primary" id="applyMetaAllButton" type="button">전부</button>
+              </div>
+              <p class="metadata-status" id="metadataStatus"></p>
+            </div>
+            <details class="advanced-box character-box" open>
+              <summary>캐릭터 프롬프트</summary>
+              <div class="character-slot">
+                <strong>캐릭터 1</strong>
+                <label class="text-field">
+                  <span>긍정</span>
+                  <textarea id="apiCharacterPositive1" rows="3" placeholder="캐릭터 외형, 의상, 표정"></textarea>
+                </label>
+                <label class="text-field">
+                  <span>부정</span>
+                  <textarea id="apiCharacterNegative1" rows="2" placeholder="이 캐릭터에서 피할 요소"></textarea>
+                </label>
+              </div>
+              <div class="character-slot">
+                <strong>캐릭터 2</strong>
+                <label class="text-field">
+                  <span>긍정</span>
+                  <textarea id="apiCharacterPositive2" rows="3" placeholder="두 번째 캐릭터가 있으면 입력"></textarea>
+                </label>
+                <label class="text-field">
+                  <span>부정</span>
+                  <textarea id="apiCharacterNegative2" rows="2" placeholder="이 캐릭터에서 피할 요소"></textarea>
+                </label>
+              </div>
+            </details>
+            <div class="input-grid compact-grid">
+              <label>
+                <span>Steps</span>
+                <input id="apiStepsInput" type="number" min="28" max="28" step="1" value="28" disabled>
+              </label>
+              <label>
+                <span>Prompt Guidance</span>
+                <input id="apiScaleInput" type="number" min="1" max="12" step="0.1" value="5">
+              </label>
+              <label>
+                <span>Guidance Rescale</span>
+                <input id="apiGuidanceRescaleInput" type="number" min="0" max="1" step="0.02" value="0">
+              </label>
+              <label>
+                <span>Strength</span>
+                <input id="apiStrengthInput" type="number" min="0" max="1" step="0.05" value="0.7">
+              </label>
+              <label>
+                <span>Noise</span>
+                <input id="apiNoiseInput" type="number" min="0" max="1" step="0.05" value="0.1">
+              </label>
+            </div>
+            <label class="select-field">
+              <span>Sampler</span>
+              <select id="apiSamplerSelect">
+                <option value="k_euler_ancestral">k_euler_ancestral</option>
+                <option value="k_euler">k_euler</option>
+                <option value="k_dpmpp_2m">k_dpmpp_2m</option>
+                <option value="k_dpmpp_2s_ancestral">k_dpmpp_2s_ancestral</option>
+                <option value="k_dpmpp_2m_sde">k_dpmpp_2m_sde</option>
+                <option value="k_dpmpp_sde">k_dpmpp_sde</option>
+              </select>
+            </label>
+            <label class="select-field">
+              <span>Noise Schedule</span>
+              <select id="apiNoiseScheduleSelect">
+                <option value="karras">karras</option>
+                <option value="exponential">exponential</option>
+                <option value="polyexponential">polyexponential</option>
+                <option value="native">native</option>
+              </select>
+            </label>
+            <label class="select-field">
+              <span>Seed</span>
+              <input id="apiSeedInput" type="number" min="0" max="4294967295" step="1" placeholder="빈칸이면 랜덤">
+            </label>
+            <details class="advanced-box">
+              <summary>추가 파라미터 JSON</summary>
+              <textarea id="apiExtraInput" rows="6">{
+  "qualityToggle": true,
+  "ucPreset": 0,
+  "sm": false,
+  "sm_dyn": false,
+  "dynamic_thresholding": false,
+  "n_samples": 1
+}</textarea>
+            </details>
+            <button class="button primary full" id="apiInpaintButton" type="button">API 인페인트</button>
+            <p class="api-status" id="apiStatus">토큰은 저장하지 않습니다. localhost 서버에서만 호출됩니다.</p>
+          </section>
+
+          <section class="panel-section">
+            <h2>결과 합성</h2>
+            <input id="resultInput" class="visually-hidden" type="file" accept="image/*">
+            <label class="button full" for="resultInput">인페인트 결과 열기</label>
+            <div class="mode-switch two" role="group" aria-label="합성 범위">
+              <button class="mode-button active" id="maskedCompositeButton" type="button">마스크</button>
+              <button class="mode-button" id="cropCompositeButton" type="button">전체 크롭</button>
+            </div>
+            <label class="range-field">
+              <span>Feather</span>
+              <input id="featherInput" type="range" min="0" max="96" value="18">
+              <output id="featherOutput">18 px</output>
+            </label>
+            <label class="range-field">
+              <span>불투명도</span>
+              <input id="opacityInput" type="range" min="0" max="100" value="100">
+              <output id="opacityOutput">100%</output>
+            </label>
+            <button class="button primary full" id="exportCompositeButton" type="button">전체 PNG 저장</button>
+          </section>
+        </aside>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
